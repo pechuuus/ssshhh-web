@@ -203,6 +203,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>(Math.round((n||0)*100)/100).toLocaleString('th-TH')+' ฿';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
+const APP_VERSION='21 Nov 21:50';
 const STAFF_DISC=40; // % off everything for staff drinks
 const tabSub=t=>(t.items||[]).reduce((s,i)=>s+i.price*i.qty,0);
 const tabDisc=t=>t.disc?Math.round(tabSub(t)*t.disc/100):0;
@@ -352,7 +353,8 @@ function initFirebase(){
     db=fs;mode='cloud';paidDay=null;
     const firstMenu={done:false};
     const ok=()=>setSync('ok','ซิงก์ทุกเครื่องแล้ว ☁️');
-    const watch=(q,fn)=>fbSubs.push(q.onSnapshot({includeMetadataChanges:true},s=>{fn(s);if(!s.metadata||!s.metadata.fromCache)ok();else setSync('warn','ออฟไลน์ — จะซิงก์เมื่อเน็ตกลับมา');render()},onErr));
+    const watch=(q,fn)=>fbSubs.push(q.onSnapshot({includeMetadataChanges:true},s=>{fn(s);if(!s.metadata||!s.metadata.fromCache)ok();render()},onErr));
+    startPing();
     watch(db.collection('menu'),s=>{S.menu=docsOf(s);if(!firstMenu.done&&!(s.metadata&&s.metadata.fromCache)){firstMenu.done=true;if(!S.menu.length)migrateLocal(true)}});
     watch(db.collection('regulars'),s=>{S.regulars=docsOf(s)});
     watch(db.collection('tabs').where('status','==','open'),s=>{S.open=docsOf(s);checkNewOrders(s)});
@@ -361,6 +363,20 @@ function initFirebase(){
     render();
   });
 }
+/* connection status: ask the server directly instead of guessing from cached data */
+let pingTimer=null;
+function ping(){
+  if(!db||mode!=='cloud')return;
+  db.collection('menu').limit(1).get({source:'server'})
+    .then(()=>setSync('ok','ซิงก์ทุกเครื่องแล้ว ☁️'))
+    .catch(e=>{console.warn(e);if(e&&e.code==='permission-denied')setSync('err','ไม่มีสิทธิ์เข้าข้อมูล');else setSync('warn','ออฟไลน์ — จะซิงก์เมื่อเน็ตกลับมา')});
+}
+function startPing(){
+  clearInterval(pingTimer);pingTimer=setInterval(ping,20000);setTimeout(ping,300);
+}
+window.addEventListener('online',()=>setTimeout(ping,500));
+window.addEventListener('offline',()=>setSync('warn','ออฟไลน์ — จะซิงก์เมื่อเน็ตกลับมา'));
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(ping,300)});
 function loginModal(){
   let last='';try{last=localStorage.getItem('fbEmail')||''}catch(e){}
   $('#modalRoot').innerHTML=`<div class="scrim"><div class="modal"><h2>☁️ เข้าสู่ระบบร้าน</h2>
@@ -743,7 +759,7 @@ function renderSettings(){
     <div class="row"><input id="newReg" placeholder="ชื่อลูกค้า" onkeydown="if(event.key==='Enter')addReg()"><button class="btn primary" onclick="addReg()">เพิ่ม</button></div>
     <div style="margin-top:8px">${[...S.regulars].sort((a,b)=>a.name.localeCompare(b.name,'th')).map(r=>`<div class="mrow"><span class="nm">${esc(r.name)}</span><span class="muted" style="font-size:13px">${r.lastVisit?'มาล่าสุด '+new Date(r.lastVisit).toLocaleDateString('th-TH',{day:'numeric',month:'short'}):''}</span><button class="mini" style="color:var(--red)" onclick="delReg('${r.id}')">ลบ</button></div>`).join('')||'<div class="muted" style="padding:10px 0">ชื่อลูกค้าจะถูกเพิ่มที่นี่อัตโนมัติเมื่อเปิดบิลด้วยชื่อใหม่</div>'}</div>
   </div></div>
-  <p class="muted" style="font-size:13px;margin-top:18px">${window.AndroidPrinter?'':mode==='cloud'?'ข้อมูลซิงก์ระหว่างทุกเครื่องที่เปิดหน้านี้ — พนักงานที่จะใช้ต้องได้รับแชร์สิทธิ์แก้ไข (Contributor ขึ้นไป)':'ตอนนี้บันทึกไว้ในเครื่องนี้เท่านั้น — เปิดผ่านลิงก์ claude.ai เพื่อซิงก์ข้ามเครื่อง'}</p>`;
+  <p class="muted" style="font-size:12px;margin-top:18px">เวอร์ชัน ${APP_VERSION}</p><p class="muted" style="font-size:13px;margin-top:4px">${window.AndroidPrinter||window.FB_CONFIG?'':mode==='cloud'?'ข้อมูลซิงก์ระหว่างทุกเครื่องที่เปิดหน้านี้ — พนักงานที่จะใช้ต้องได้รับแชร์สิทธิ์แก้ไข (Contributor ขึ้นไป)':'ตอนนี้บันทึกไว้ในเครื่องนี้เท่านั้น — เปิดผ่านลิงก์ claude.ai เพื่อซิงก์ข้ามเครื่อง'}</p>`;
 }
 function menuModal(id){
   const m=id?S.menu.find(x=>x.id===id):{name:'',price:'',cat:curCat||'beer',sort:''};
