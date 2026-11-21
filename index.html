@@ -339,6 +339,9 @@ function initFirebase(){
   try{firebase.initializeApp(window.FB_CONFIG)}catch(e){}
   fbAuth=firebase.auth();
   const fs=firebase.firestore();
+  // Inside the Android app the default streaming connection gets held back by the WebView, so updates arrive late.
+  // Long-polling delivers each change as soon as it happens.
+  if(window.AndroidPrinter){try{fs.settings({experimentalForceLongPolling:true,experimentalAutoDetectLongPolling:false,merge:true})}catch(e){console.warn(e)}}
   try{fs.enablePersistence({synchronizeTabs:false}).catch(()=>{})}catch(e){}
   setSync('warn','กำลังเชื่อมต่อ…');
   fbAuth.onAuthStateChanged(u=>{
@@ -349,7 +352,7 @@ function initFirebase(){
     db=fs;mode='cloud';paidDay=null;
     const firstMenu={done:false};
     const ok=()=>setSync('ok','ซิงก์ทุกเครื่องแล้ว ☁️');
-    const watch=(q,fn)=>fbSubs.push(q.onSnapshot({includeMetadataChanges:false},s=>{fn(s);if(!s.metadata||!s.metadata.fromCache)ok();else setSync('warn','ออฟไลน์ — จะซิงก์เมื่อเน็ตกลับมา');render()},onErr));
+    const watch=(q,fn)=>fbSubs.push(q.onSnapshot({includeMetadataChanges:true},s=>{fn(s);if(!s.metadata||!s.metadata.fromCache)ok();else setSync('warn','ออฟไลน์ — จะซิงก์เมื่อเน็ตกลับมา');render()},onErr));
     watch(db.collection('menu'),s=>{S.menu=docsOf(s);if(!firstMenu.done&&!(s.metadata&&s.metadata.fromCache)){firstMenu.done=true;if(!S.menu.length)migrateLocal(true)}});
     watch(db.collection('regulars'),s=>{S.regulars=docsOf(s)});
     watch(db.collection('tabs').where('status','==','open'),s=>{S.open=docsOf(s);checkNewOrders(s)});
@@ -544,14 +547,32 @@ function renderBill(){
   </div>`;
 }
 function saveTab(t){put('tabs',t.id,t)}
-function toggleStaff(){const t=curTab();if(!t)return;const on=!t.disc;const n={...t};if(on)n.disc=STAFF_DISC;else delete n.disc;saveTab(n);toast(on?'ใช้ส่วนลดพนักงาน −'+STAFF_DISC+'%':'ยกเลิกส่วนลดพนักงาน')}
+function toggleStaff(){const t=curTab();if(!t)return;const on=!t.disc;mutateTab(t.id,n=>{if(on)n.disc=STAFF_DISC;else delete n.disc;return n});toast(on?'ใช้ส่วนลดพนักงาน −'+STAFF_DISC+'%':'ยกเลิกส่วนลดพนักงาน')}
+/* Bill changes are applied as small edits on the latest copy in the cloud (a transaction),
+   so two phones editing the same bill, or the bar marking an order as sent, never overwrite each other. */
+const lineKey=i=>i.mid+'|'+i.price+'|'+(i.mix||'');
+function mutateTab(id,fn){
+  const cur=S.open.find(x=>x.id===id);
+  if(mode!=='cloud'){if(cur)saveTab(fn(JSON.parse(JSON.stringify(cur))));return}
+  if(cur){const local=fn(JSON.parse(JSON.stringify(cur)));patchState('tabs',id,local);render()}
+  const ref=db.collection('tabs').doc(id);
+  const key='tabs/'+id;
+  queues[key]=(queues[key]||Promise.resolve()).then(()=>db.runTransaction(async tx=>{
+    const d=await tx.get(ref);if(!d.exists)return;const fresh={...d.data(),id};if(fresh.status!=='open')return;
+    tx.set(ref,{...fn(JSON.parse(JSON.stringify(fresh))),id});
+  })).catch(e=>{ // offline: fall back to writing our local copy
+    console.warn(e);const c=S.open.find(x=>x.id===id);
+    if(c)return ref.set({...c,id}).catch(e2=>{console.error(e2);toast('บันทึกไม่สำเร็จ — ตรวจสอบอินเทอร์เน็ต',true)});
+  });
+}
 function addItem(mid,mix){
   const t=curTab(),m=S.menu.find(x=>x.id===mid);if(!t||!m)return;
   if(isGlass(m)&&mix===undefined){mixModal(mid);return}
   mix=mix||'';
-  const items=[...(t.items||[])];const ix=items.findIndex(i=>i.mid===mid&&i.price===m.price&&(i.mix||'')===mix);
-  if(ix>=0)items[ix]={...items[ix],qty:items[ix].qty+1};else items.push({mid,name:m.name,price:m.price,qty:1,sent:0,...(mix?{mix}:{})});
-  saveTab({...t,items});toast('+1 '+m.name+(mix?' + '+mix:''));
+  const k=mid+'|'+m.price+'|'+mix;
+  mutateTab(t.id,t=>{const items=t.items||[];const it=items.find(i=>lineKey(i)===k);
+    if(it)it.qty+=1;else items.push({mid,name:m.name,price:m.price,qty:1,sent:0,...(mix?{mix}:{})});t.items=items;return t});
+  toast('+1 '+m.name+(mix?' + '+mix:''));
 }
 function mixModal(mid){
   const m=S.menu.find(x=>x.id===mid);
@@ -560,10 +581,11 @@ function mixModal(mid){
   <div class="row" style="justify-content:flex-end"><button class="btn" onclick="closeModal()">ยกเลิก</button></div>`);
 }
 function chgQty(ix,d){
-  const t=curTab();if(!t)return;const items=[...t.items];
-  const q=items[ix].qty+d;if(q<0)return;
-  if(q===0&&sentOf(items[ix])===0)items.splice(ix,1);else items[ix]={...items[ix],qty:q}; // keep a 0-qty line until the bar is told it's cancelled
-  saveTab({...t,items});
+  const t=curTab();if(!t||!t.items[ix])return;const k=lineKey(t.items[ix]);
+  mutateTab(t.id,t=>{const items=t.items||[];const j=items.findIndex(i=>lineKey(i)===k);if(j<0)return t;
+    const q=items[j].qty+d;if(q<0)return t;
+    if(q===0&&sentOf(items[j])===0)items.splice(j,1);else items[j].qty=q; // keep a 0-qty line until the bar is told it's cancelled
+    t.items=items;return t});
 }
 function renameModal(){
   const t=curTab();
@@ -882,7 +904,7 @@ async function receiptCanvas(t){
 }
 /* ---------- bar order slip ---------- */
 const slipJobs={};
-function slipLines(t){return (t.items||[]).map((i,ix)=>({ix,i,d:i.qty-sentOf(i)})).filter(o=>o.d!==0)}
+function slipLines(t){return (t.items||[]).map((i,ix)=>({ix,i:{...i},d:i.qty-sentOf(i)})).filter(o=>o.d!==0)}
 async function slipCanvas(t,lines){
   const F='"IBM Plex Sans Thai",sans-serif';
   try{await Promise.all(['700 40px '+F,'700 34px '+F,'400 24px '+F].map(f=>document.fonts.load(f)))}catch(e){}
@@ -909,9 +931,9 @@ async function slipCanvas(t,lines){
   const out=document.createElement('canvas');out.width=W;out.height=y;out.getContext('2d').drawImage(c,0,0);return out;
 }
 function markSent(tid,lines){
-  const t=S.open.find(x=>x.id===tid);if(!t)return;
-  const items=(t.items||[]).map(i=>{const o=lines.find(l=>l.i.mid===i.mid&&l.i.price===i.price&&(l.i.mix||'')===(i.mix||''));return o?{...i,sent:sentOf(i)+o.d}:i}).filter(i=>i.qty>0||i.sent>0);
-  saveTab({...t,items,slips:(t.slips||0)+1});
+  // record exactly the quantity that was on the printed slip (absolute, so repeating it can never double-count)
+  const printed={};lines.forEach(l=>printed[lineKey(l.i)]=l.i.qty);
+  mutateTab(tid,t=>{t.items=(t.items||[]).map(i=>{const k=lineKey(i);return k in printed?{...i,sent:printed[k]}:i}).filter(i=>i.qty>0||i.sent>0);t.slips=(t.slips||0)+1;return t});
 }
 async function sendToBar(tid){
   let t=S.open.find(x=>x.id===tid);if(!t)return;
