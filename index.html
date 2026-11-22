@@ -205,7 +205,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>(Math.round((n||0)*100)/100).toLocaleString('th-TH')+' ฿';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const APP_VERSION='22 Nov 11:00';
+const APP_VERSION='22 Nov 12:05';
 const STAFF_DISC=40;
 const STAFF_TREAT=20; // ฿ the staff member gets for each drink a customer buys them (customer price unchanged) // % off everything for staff drinks
 const tabSub=t=>(t.items||[]).reduce((s,i)=>s+i.price*i.qty,0);
@@ -451,7 +451,52 @@ function saveDay(patch){const ts=sumDayTs,id='d'+ts;const d={...(dayX.day||{}),i
 const BEER_SUPPLY='ค่าเบียร์ (ร้านส่ง)';
 const EXP_CATS=[BEER_SUPPLY,'น้ำแข็ง','ของใช้ในร้าน','อื่นๆ'];
 const WED_WAGE=500; // each staff member on Wednesday (Open Jam)
-function costOf(i){if(i.cost!=null)return i.cost;const m=S.menu.find(x=>x.id===i.mid);return m&&m.cost!=null?m.cost:null}
+function costOf(i){if(i.cost!=null)return i.cost;const m=S.menu.find(x=>x.id===i.mid);return m&&m.cost!=null?m.cost+mixerCost(i.mix):null}
+// the free mixer poured with a spirit glass costs the same as one can/bottle of that mixer on the menu
+const MIX_MENU={'Soda':/^soda/i,'Tonic':/tonic/i,'Coke':/^coke$/i,'Coke Zero':/coke zero/i,'Sprite':/sprite/i,'Manao Soda':/manao/i,'Water':/water/i};
+function mixerCost(mix){if(!mix||!MIX_MENU[mix])return 0;const m=S.menu.find(x=>x.cat==='other'&&MIX_MENU[mix].test(x.name));return m&&m.cost!=null?m.cost:0}
+/* unit costs worked out from the supplier receipts (Sep–Nov 2026).
+   spirits: 1 L bottles (Bombay & Tequila Rose 750 ml); a glass = 60 ml (16.7 per litre), a shot = 33 ml (30.3 per litre); wine: 5 L box, 150 ml a glass */
+const COST_PRESET=[
+  [/^leo.*large/i,53.75,'Leo 620ml ลัง 12 = 645'],[/^leo.*small/i,33.63,'Leo 320ml ลัง 24 = 807'],
+  [/^chang.*large/i,52.92,'ช้าง 620ml ลัง 12 = 635'],[/^chang.*small/i,33.21,'ช้าง 320ml ลัง 24 = 797'],
+  [/^singha.*large/i,58.17,'สิงห์ 620ml ลัง 12 = 698'],[/^singha.*small/i,35.33,'สิงห์ 320ml ลัง 24 = 848'],
+  [/^my beer.*large/i,55,'มายเบียร์ 620ml ขวดละ 55'],[/^my beer.*small/i,28.96,'มายเบียร์เล็ก ลัง 24 = 695'],
+  [/heineken/i,44.13,'ไฮเนเก้นเล็ก ลัง 24 = 1,059'],[/san miguel|sanmig/i,42.92,'Sanmig Light ลัง 24 = 1,030'],
+  [/^spy/i,33,'Spy ขวดละ 33'],[/smirnoff ice/i,55,'Smirnoff Ice ขวดละ 55'],
+  [/^soda/i,8.33,'สิงห์โซดา 325ml แพ็ค 24 = 200'],[/water/i,4.08,'คริสตัล 600ml แพ็ค 12 = 49'],
+  [/^coke$/i,14.33,'โค้ก แพ็ค 6 = 86'],[/coke zero/i,14.33,'โค้กไม่มีน้ำตาล แพ็ค 6 = 86'],[/sprite/i,14.33,'สไปรท์ แพ็ค 6 = 86'],
+  [/tonic/i,15.21,'ชเวปส์ โทนิค 24 กระป๋อง = 365'],[/manao/i,15.33,'ชเวปส์ มะนาว แพ็ค 6 = 92'],
+  [/orange/i,19.5,'มาลี 1L = 78 (4 แก้ว)'],[/pineapple/i,19.5,'มาลี 1L = 78 (4 แก้ว)'],
+  [/sangsom/i,26.4,'แสงโสม 1L = 440 ÷ 16.7 แก้ว (60ml)'],[/hong thong/i,23.7,'หงษ์ทอง 1L = 395 ÷ 16.7'],
+  [/walker red|jw red/i,55.2,'JW Red 1L = 920 ÷ 16.7'],[/walker black|jw black/i,100.2,'JW Black 1L = 1,670 ÷ 16.7'],
+  [/jack daniel/i,94.8,"Jack Daniel's 1L = 1,580 ÷ 16.7"],[/gilbey/i,29.7,"Gilbey's 1L = 495 ÷ 16.7"],[/bombay/i,96,'Bombay 750ml = 1,200 ÷ 12.5'],
+  [/kulov/i,26.1,'Kulov 1L = 435 ÷ 16.7'],[/smirnoff vodka/i,49.2,'Smirnoff Vodka 1L = 820 ÷ 16.7'],[/bacardi/i,54.9,'Bacardi 1L = 915 ÷ 16.7'],
+  [/aquavit/i,82.5,'Aquavit 1L ≈ 2,500 ÷ 30.3 ช็อต (33ml)'],
+  [/j[äa]germeister/i,44.06,'Jäger 1L = 1,335 ÷ 30.3 ช็อต (33ml)'],[/tequila rose/i,38.5,'Tequila Rose 750ml = 875 ÷ 22.7 ช็อต'],[/tequila (silver|sierra)/i,42.74,'Tequila Sierra 1L = 1,295 ÷ 30.3 ช็อต'],
+  [/red wine/i,33.9,'LA VIDA Red 5L = 1,130 ÷ 33 แก้ว'],[/white wine/i,33.9,'LA VIDA White 5L = 1,130 ÷ 33 แก้ว']];
+function presetPlan(){
+  const plan=[],used=new Set();
+  S.menu.forEach(m=>{const p=COST_PRESET.find(([re])=>re.test(m.name));if(p){plan.push({m,cost:p[1],note:p[2]});used.add(p)}});
+  const add=[];if(!S.menu.some(m=>/red wine/i.test(m.name)))add.push({name:'Red Wine (glass)',price:120,cat:'spirit',cost:33.9});
+  if(!S.menu.some(m=>/white wine/i.test(m.name)))add.push({name:'White Wine (glass)',price:120,cat:'spirit',cost:33.9});
+  const none=S.menu.filter(m=>!COST_PRESET.some(([re])=>re.test(m.name))&&m.cost==null).map(m=>m.name);
+  return {plan,add,none};
+}
+function presetModal(){
+  const {plan,add,none}=presetPlan();
+  modal(`<h2 style="margin-bottom:2px">📥 ใส่ต้นทุนจากใบเสร็จร้านส่ง</h2><div class="muted">เหล้า 1 ลิตร (Bombay, Tequila Rose 750ml) · แก้ว = 60ml (16.7 แก้ว/ลิตร) · ช็อต = 33ml (30.3 ช็อต/ลิตร) · ไวน์ 150ml/แก้ว</div>
+  <div style="max-height:45vh;overflow:auto;margin:10px 0"><table>${plan.map(x=>`<tr><td>${esc(x.m.name)}<div class="muted" style="font-size:12px">${esc(x.note)}</div></td><td class="r">${x.m.cost!=null&&x.m.cost!==x.cost?'<s class="muted">'+x.m.cost+'</s> ':''}<b>${x.cost}</b></td></tr>`).join('')}
+  ${add.map(a=>`<tr><td>➕ เพิ่มเมนู ${esc(a.name)} · ${a.price} ฿</td><td class="r"><b>${a.cost}</b></td></tr>`).join('')}</table></div>
+  ${none.length?`<p style="color:#c77700;font-size:13px">ไม่มีในใบเสร็จ ต้องใส่เอง: ${esc(none.join(', '))}</p>`:''}
+  <div class="row" style="justify-content:flex-end"><button class="btn" onclick="closeModal()">ยกเลิก</button><button class="btn primary" onclick="applyPreset()">ใส่ต้นทุนทั้งหมด</button></div>`);
+}
+function applyPreset(){
+  const {plan,add}=presetPlan();
+  plan.forEach(({m,cost})=>put('menu',m.id,{...m,cost}));
+  add.forEach(a=>{const id=uid();put('menu',id,{id,...a,sort:20})});
+  closeModal();toast('ใส่ต้นทุนแล้ว '+plan.length+' รายการ'+(add.length?' · เพิ่มไวน์ '+add.length+' เมนู':''));
+}
 function cogsOf(tabs){let c=0,missing=new Set();tabs.forEach(t=>(t.items||[]).forEach(i=>{if(i.qty<=0)return;const k=costOf(i);if(k==null)missing.add(i.name);else c+=k*i.qty}));return {c,missing:[...missing]}}
 const wagesTotal=d=>Object.values((d&&d.wages)||{}).reduce((s,v)=>s+(v||0),0);
 function defaultWage(name){if(new Date(sumDayTs).getDay()===3)return WED_WAGE;try{const v=localStorage.getItem('wage:'+name);if(v)return parseFloat(v)}catch(e){}return WED_WAGE}
@@ -799,7 +844,7 @@ function addItem(mid,mix){
   const names=!comp&&treatMode&&treatMode.tab===t.id?(treatMode.target==='all'?treatMode.names:[treatMode.target]):[''];
   const price=comp?0:m.price;
   mutateTab(t.id,t=>{const items=t.items||[];
-    names.forEach(treat=>addLine(items,{mid,name:m.name,price,...(m.cost!=null?{cost:m.cost}:{}),...(mix?{mix}:{}),...(treat?{treat}:{}),...(comp?{comp,orig:m.price}:{})},1));
+    names.forEach(treat=>addLine(items,{mid,name:m.name,price,...(m.cost!=null?{cost:Math.round((m.cost+mixerCost(mix))*100)/100}:{}),...(mix?{mix}:{}),...(treat?{treat}:{}),...(comp?{comp,orig:m.price}:{})},1));
     t.items=items;return t});
   toast('+'+names.length+' '+m.name+(mix?' + '+mix:'')+(names[0]?' 🍻 '+names.join(', '):'')+(comp?' 🎁 ฟรี':''));
 }
@@ -1056,7 +1101,7 @@ function renderSettings(){
     ${mode==='cloud'&&fbUser?`<div class="row" style="margin-top:12px;flex-wrap:wrap"><b>☁️ ซิงก์ทุกเครื่อง</b><span class="muted" style="font-size:13px">${esc(fbUser.email||'')}</span><label class="check" style="font-size:15px;color:var(--text)"><input type="checkbox" ${soundOn()?'checked':''} onchange="setSound(this.checked)"> 🔔 เสียงเตือนเมื่อมีออเดอร์เข้าบาร์</label>${window.AndroidPrinter?`<label class="check" style="font-size:15px;color:var(--text)"><input type="checkbox" ${stationOn()?'checked':''} onchange="setStation(this.checked)"> 🖨 รับงานพิมพ์จากเครื่องอื่น (เช่น iPhone)${printerIp()?'':' — ต้องตั้ง IP เครื่องพิมพ์ก่อน'}</label>`:'<span class="muted" style="font-size:13px">ใบสั่งบาร์และบิลจะพิมพ์ที่เครื่อง Android ที่บาร์</span>'}
 <button class="btn" style="margin-left:auto" onclick="migrateModal()" ${window.AndroidPrinter?'':'hidden'}>อัปโหลดข้อมูลเก่าในเครื่องนี้</button><button class="btn" onclick="backupData()">สำรองข้อมูล</button><button class="btn" style="color:var(--red)" onclick="logout()">ออกจากระบบ</button></div>`:`<div class="row" style="margin-top:12px;flex-wrap:wrap"><b>💾 ข้อมูล</b><span class="muted" style="font-size:13px">เก็บในเครื่องนี้ — สำรองไว้กันเครื่องหาย</span><button class="btn" style="margin-left:auto" onclick="backupData()">สำรองข้อมูล</button><button class="btn" onclick="importModal()">นำเข้า</button>${window.FB_CONFIG?'<button class="btn primary" onclick="loginModal()">☁️ เข้าสู่ระบบซิงก์</button>':''}</div>`}</div>`:''}<div class="cols">
   <div class="box">
-    <div class="row" style="justify-content:space-between"><h2 style="margin:0">เมนูเครื่องดื่ม</h2><button class="btn primary" onclick="menuModal()">+ เพิ่มเมนู</button></div>
+    <div class="row" style="justify-content:space-between"><h2 style="margin:0">เมนูเครื่องดื่ม</h2><div class="row"><button class="btn" onclick="presetModal()">📥 ใส่ต้นทุนจากใบเสร็จ</button><button class="btn primary" onclick="menuModal()">+ เพิ่มเมนู</button></div></div>
     ${CATS.map(c=>`<h3>${c.label}</h3>${byCat(c.id).map(m=>`<div class="mrow"><span style="width:14px;height:14px;border-radius:4px;flex:none;background:${tileOf(m).bg};border:1px solid var(--line)"></span><span class="nm">${esc(m.name)}</span>${m.cost!=null?`<span class="muted" style="font-size:12px">ทุน ${m.cost}</span>`:'<span style="font-size:12px;color:#c77700">ยังไม่ใส่ทุน</span>'}<span class="pr">${money(m.price)}</span>
       <button class="mini" onclick="menuModal('${m.id}')">แก้ไข</button></div>`).join('')||'<div class="muted" style="font-size:14px">—</div>'}`).join('')}
     ${!S.menu.length?`<div class="change" style="margin-top:16px"><p class="muted" style="margin-top:0">อยากเริ่มจากเมนูตัวอย่าง แล้วค่อยแก้ราคาทีหลังก็ได้ค่ะ</p><button class="btn" onclick="seedMenu()">ใส่เมนูตัวอย่าง</button></div>`:''}
