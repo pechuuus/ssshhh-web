@@ -205,7 +205,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>(Math.round((n||0)*100)/100).toLocaleString('th-TH')+' ฿';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const APP_VERSION='22 Nov 12:05';
+const APP_VERSION='22 Nov 13:00';
 const STAFF_DISC=40;
 const STAFF_TREAT=20; // ฿ the staff member gets for each drink a customer buys them (customer price unchanged) // % off everything for staff drinks
 const tabSub=t=>(t.items||[]).reduce((s,i)=>s+i.price*i.qty,0);
@@ -243,15 +243,15 @@ function tileOf(m){
 }
 
 /* ---------- state ---------- */
-const S={menu:[],regulars:[],staff:[],open:[],hold:[],paidToday:[],expenses:[],days:[]};
+const S={menu:[],regulars:[],staff:[],open:[],hold:[],paidToday:[],expenses:[],days:[],stock:[]};
 let mode='local', db=null, view='tabs', curTabId=null, curCat='pop', sumDayTs=dayStart(), sumHistory=null;
-let L={menu:{},regulars:{},staff:{},tabs:{},expenses:{},days:{}};
+let L={menu:{},regulars:{},staff:{},tabs:{},expenses:{},days:{},stock:{}};
 
 /* ---------- storage: cloud (shared db) or local fallback ---------- */
 function loadLocal(){try{const r=localStorage.getItem('ssshhh-pos');if(r)L=JSON.parse(r);else if(window.SEED){L=JSON.parse(JSON.stringify(window.SEED));saveLocal()}}catch(e){}deriveLocal()}
 function saveLocal(){try{localStorage.setItem('ssshhh-pos',JSON.stringify(L))}catch(e){}}
 function deriveLocal(){
-  L.staff=L.staff||{};L.expenses=L.expenses||{};L.days=L.days||{};S.menu=Object.values(L.menu);S.regulars=Object.values(L.regulars);S.staff=Object.values(L.staff);
+  L.staff=L.staff||{};L.expenses=L.expenses||{};L.days=L.days||{};L.stock=L.stock||{};S.menu=Object.values(L.menu);S.regulars=Object.values(L.regulars);S.staff=Object.values(L.staff);
   const tabs=Object.values(L.tabs);
   S.open=tabs.filter(t=>t.status==='open');S.hold=tabs.filter(t=>t.status==='hold');
   S.paidToday=tabs.filter(t=>t.status==='paid'&&t.paidAt>=dayStart());
@@ -402,7 +402,7 @@ async function doLogin(){
 }
 function logout(){confirmModal('ออกจากระบบ?','เครื่องนี้จะหยุดซิงก์จนกว่าจะล็อกอินใหม่','ออกจากระบบ',()=>fbAuth.signOut())}
 async function migrateLocal(auto){
-  const cols=['menu','regulars','staff','tabs','expenses','days'];let n=0;
+  const cols=['menu','regulars','staff','tabs','expenses','days','stock'];let n=0;
   const docs=[];cols.forEach(c=>Object.values(L[c]||{}).forEach(d=>{if(d&&d.id)docs.push([c,d])}));
   if(!docs.length)return;
   if(auto)toast('กำลังย้ายข้อมูลในเครื่องขึ้นคลาวด์…');
@@ -474,7 +474,11 @@ const COST_PRESET=[
   [/kulov/i,26.1,'Kulov 1L = 435 ÷ 16.7'],[/smirnoff vodka/i,49.2,'Smirnoff Vodka 1L = 820 ÷ 16.7'],[/bacardi/i,54.9,'Bacardi 1L = 915 ÷ 16.7'],
   [/aquavit/i,82.5,'Aquavit 1L ≈ 2,500 ÷ 30.3 ช็อต (33ml)'],
   [/j[äa]germeister/i,44.06,'Jäger 1L = 1,335 ÷ 30.3 ช็อต (33ml)'],[/tequila rose/i,38.5,'Tequila Rose 750ml = 875 ÷ 22.7 ช็อต'],[/tequila (silver|sierra)/i,42.74,'Tequila Sierra 1L = 1,295 ÷ 30.3 ช็อต'],
+  [/jim beam/i,58.2,'Jim Beam 700ml = 679 ÷ 11.7 แก้ว'],
   [/red wine/i,33.9,'LA VIDA Red 5L = 1,130 ÷ 33 แก้ว'],[/white wine/i,33.9,'LA VIDA White 5L = 1,130 ÷ 33 แก้ว']];
+// how many servings one stock unit (bottle / box) gives — used by the stock count
+const SERV_PRESET=[[/bombay/i,12.5],[/jim beam/i,11.67],[/tequila rose/i,22.7],[/wine/i,33.3],[/\(shot\)/i,30.3],[/\(glass\)/i,16.67]];
+function servOf(m){if(!m)return 1;if(m.serv)return m.serv;if(m.cat!=='spirit')return 1;const p=SERV_PRESET.find(([re])=>re.test(m.name));return p?p[1]:16.67}
 function presetPlan(){
   const plan=[],used=new Set();
   S.menu.forEach(m=>{const p=COST_PRESET.find(([re])=>re.test(m.name));if(p){plan.push({m,cost:p[1],note:p[2]});used.add(p)}});
@@ -493,7 +497,7 @@ function presetModal(){
 }
 function applyPreset(){
   const {plan,add}=presetPlan();
-  plan.forEach(({m,cost})=>put('menu',m.id,{...m,cost}));
+  plan.forEach(({m,cost})=>{const d={...m,cost};if(m.cat==='spirit'&&!m.serv)d.serv=servOf(m);put('menu',m.id,d)});
   add.forEach(a=>{const id=uid();put('menu',id,{id,...a,sort:20})});
   closeModal();toast('ใส่ต้นทุนแล้ว '+plan.length+' รายการ'+(add.length?' · เพิ่มไวน์ '+add.length+' เมนู':''));
 }
@@ -574,6 +578,7 @@ function repRange(){
   return {start:d.getTime(),end:e.getTime(),label:d.toLocaleDateString('th-TH',{month:'long',year:'numeric'})};
 }
 async function loadReport(){
+  if(rep.kind==='stock')return loadStock();
   const r=repRange();rep.range=r;rep.data=null;
   try{const [tabs,exps,days]=await Promise.all([queryCol('tabs','paidAt','>=',r.start),queryCol('expenses','dayTs','>=',r.start),queryCol('days','dayTs','>=',r.start)]);
     if(rep.range!==r)return;rep.data={tabs:tabs.filter(t=>t.status==='paid'&&t.paidAt<r.end),exps:exps.filter(e=>e.dayTs<r.end),days:days.filter(d=>d.dayTs<r.end)};}
@@ -598,8 +603,9 @@ function repCalc(){
   return {dl,sum,drinks,beer,treats,expCats,missing:[...missing]};
 }
 function renderReport(){
+  if(rep.kind==='stock')return renderStock();
   const r=rep.range||repRange();
-  const head=`<div class="row" style="flex-wrap:wrap;margin-bottom:12px"><div class="seg"><button class="${rep.kind==='week'?'on':''}" onclick="repSet('week',0)">รายสัปดาห์ (พุธ–เสาร์)</button><button class="${rep.kind==='month'?'on':''}" onclick="repSet('month',0)">รายเดือน</button></div></div>
+  const head=`<div class="row" style="flex-wrap:wrap;margin-bottom:12px"><div class="seg"><button class="${rep.kind==='week'?'on':''}" onclick="repSet('week',0)">รายสัปดาห์ (พุธ–เสาร์)</button><button class="${rep.kind==='month'?'on':''}" onclick="repSet('month',0)">รายเดือน</button><button class="${rep.kind==='stock'?'on':''}" onclick="repSet('stock',0)">📦 สต็อก</button></div></div>
   <div class="row" style="margin-bottom:14px;flex-wrap:wrap"><button class="btn" onclick="repSet(rep.kind,rep.off-1)">‹</button><h2 style="margin:0">${esc(r.label)}</h2><button class="btn" onclick="repSet(rep.kind,rep.off+1)" ${rep.off>=0?'disabled':''}>›</button>
   <button class="btn primary" style="margin-left:auto" onclick="exportReport()" ${rep.data?'':'disabled'}>⬇️ ส่งออก Excel</button></div>`;
   if(!rep.data)return head+'<div class="empty">กำลังโหลด…</div>';
@@ -651,6 +657,83 @@ async function saveText(name,text,type){
   const blob=new Blob([text],{type:type+';charset=utf-8'});
   if(dl){try{await dl.save({filename:name,data:blob});return}catch(e){if(e&&e.code==='declined')return}}
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},1500);
+}
+
+/* ---------- 📦 stock count ---------- */
+let stk={counts:null,ins:[],sold:null,mode:null,draft:{},base:null};
+const stockItems=()=>S.menu.filter(m=>m.cat==='beer'||m.cat==='spirit').sort((a,b)=>(a.cat>b.cat?1:a.cat<b.cat?-1:0)||((a.sort??999)-(b.sort??999))||a.name.localeCompare(b.name));
+const caseOf=m=>m.cat!=='beer'?0:/large|620/i.test(m.name)?12:/small|320|330/i.test(m.name)?24:0;
+const r1=n=>Math.round(n*10)/10;
+async function loadStock(){
+  try{const all=await queryCol('stock','ts','>=',0);
+    stk.counts=all.filter(d=>d.type==='count').sort((a,b)=>b.ts-a.ts);stk.ins=all.filter(d=>d.type==='in');
+    const base=stk.counts[0];stk.sold=null;
+    if(base){const tabs=await queryCol('tabs','paidAt','>=',stk.counts[1]?stk.counts[1].ts:base.ts);stk.paidSince=tabs.filter(t=>t.status==='paid')}
+  }catch(e){console.error(e);stk.counts=[];toast('โหลดสต็อกไม่ได้',true)}
+  if(view==='report')render();
+}
+function soldBetween(from,to,includeOpen){ // stock units (bottles) used between two moments
+  const u={};const add=t=>(t.items||[]).forEach(i=>{if(i.qty<=0)return;const m=S.menu.find(x=>x.id===i.mid);if(!m||(m.cat!=='beer'&&m.cat!=='spirit'))return;u[i.mid]=(u[i.mid]||0)+i.qty/servOf(m)});
+  (stk.paidSince||[]).filter(t=>t.paidAt>from&&t.paidAt<=to).forEach(add);
+  S.hold.filter(t=>(t.heldAt||0)>from&&(t.heldAt||0)<=to).forEach(add);
+  if(includeOpen)S.open.forEach(add);
+  return u;
+}
+function inBetween(from,to){const u={};stk.ins.filter(d=>d.ts>from&&d.ts<=to).forEach(d=>Object.entries(d.items||{}).forEach(([k,v])=>u[k]=(u[k]||0)+v));return u}
+function stockStart(mode){stk.mode=mode;stk.draft={};render();window.scrollTo(0,0)}
+function stkSet(id,v){v=Math.max(0,r1(v));if(v===0&&stk.mode==='in')delete stk.draft[id];else stk.draft[id]=v;const el=document.getElementById('sk_'+id);if(el)el.value=stk.draft[id]??''}
+function stkAdd(id,d){stkSet(id,(parseFloat(stk.draft[id])||0)+d)}
+function stockSave(){
+  const items={};Object.entries(stk.draft).forEach(([k,v])=>{const n=parseFloat(v);if(n>=0&&v!=='')items[k]=r1(n)});
+  if(!Object.keys(items).length){toast('ยังไม่ได้ใส่จำนวนเลย',true);return}
+  const done=()=>{const id=uid(),d={id,type:stk.mode,ts:Date.now(),items};put('stock',id,d);if(d.type==='count')stk.counts.unshift(d);else stk.ins.push(d);stk.mode=null;stk.draft={};toast('บันทึกแล้ว ✓');render();setTimeout(loadStock,2000)};
+  if(stk.mode==='count'){const miss=stockItems().filter(m=>!(m.id in items));
+    if(miss.length){confirmModal('ยังไม่ได้นับ '+miss.length+' รายการ',esc(miss.map(m=>m.name).join(', '))+' — บันทึกเป็น 0 (ไม่มีของ)?','บันทึกเป็น 0',()=>{miss.forEach(m=>items[m.id]=0);done()});return}}
+  done();
+}
+function stockDel(id){confirmModal('ลบรายการนี้?','','ลบ',()=>{put('stock',id,null);stk.counts=stk.counts.filter(d=>d.id!==id);stk.ins=stk.ins.filter(d=>d.id!==id);render();setTimeout(loadStock,2000)})}
+function renderStock(){
+  const head=`<div class="row" style="flex-wrap:wrap;margin-bottom:12px"><div class="seg"><button onclick="repSet('week',0)">รายสัปดาห์ (พุธ–เสาร์)</button><button onclick="repSet('month',0)">รายเดือน</button><button class="on">📦 สต็อก</button></div></div>`;
+  if(stk.counts===null)return head+'<div class="empty">กำลังโหลด…</div>';
+  const items=stockItems();const fmt=n=>(Math.round(n*10)/10).toLocaleString('th-TH');
+  if(stk.mode){
+    const isIn=stk.mode==='in';
+    return head+`<div class="box"><div class="row" style="justify-content:space-between;flex-wrap:wrap"><h2 style="margin:0">${isIn?'🚚 รับของเข้า':'📋 นับสต็อก'}</h2><div class="row"><button class="btn" onclick="stk.mode=null;render()">ยกเลิก</button><button class="btn primary big" onclick="stockSave()">บันทึก</button></div></div>
+    <p class="muted">${isIn?'ใส่เฉพาะของที่เพิ่งมาส่ง — เบียร์กด +1 ลัง ได้เลย':'นับของที่มีอยู่จริงตอนนี้ — เหล้าที่เปิดแล้วใส่เป็นทศนิยม เช่น ครึ่งขวด = 0.5'}</p>
+    ${CATS.filter(c=>c.id!=='other').map(c=>`<h3>${c.label}</h3>${items.filter(m=>m.cat===c.id).map(m=>{const cs=caseOf(m),sp=m.cat==='spirit';return `<div class="row" style="padding:8px 0;border-bottom:1px solid var(--line);flex-wrap:wrap;gap:6px">
+      <span style="flex:1;min-width:150px">${esc(m.name)}<span class="muted" style="font-size:12px"> · ${sp?'ขวด':'ขวด/กระป๋อง'}</span></span>
+      ${sp?`<button class="mini" onclick="stkAdd('${m.id}',-0.1)">−0.1</button>`:`<button class="mini" onclick="stkAdd('${m.id}',-1)">−1</button>`}
+      <input id="sk_${m.id}" type="number" inputmode="decimal" step="${sp?0.1:1}" style="max-width:90px;text-align:center" value="${stk.draft[m.id]??''}" onchange="stkSet('${m.id}',parseFloat(this.value)||0)">
+      ${sp?`<button class="mini" onclick="stkAdd('${m.id}',0.1)">+0.1</button><button class="mini" onclick="stkAdd('${m.id}',1)">+1</button>`:`<button class="mini" onclick="stkAdd('${m.id}',1)">+1</button>${cs?`<button class="mini" onclick="stkAdd('${m.id}',${cs})">+1 ลัง (${cs})</button>`:''}`}</div>`}).join('')}`).join('')}
+    <div class="row" style="justify-content:flex-end;margin-top:14px"><button class="btn primary big" onclick="stockSave()">บันทึก</button></div></div>`;
+  }
+  const btns=`<div class="row" style="flex-wrap:wrap;margin-bottom:14px"><button class="btn primary big" onclick="stockStart('count')">📋 นับสต็อก</button><button class="btn big" onclick="stockStart('in')">🚚 รับของเข้า</button></div>`;
+  if(!stk.counts.length)return head+btns+`<div class="box"><h3 style="margin-top:0">เริ่มยังไง</h3><ol style="line-height:1.8;margin:0;padding-left:20px">
+    <li><b>วันพุธก่อนเปิดร้าน</b> กด 📋 นับสต็อก แล้วนับเบียร์และเหล้าทุกขวด (เหล้าที่เปิดแล้วใส่ทศนิยม เช่น 0.5)</li>
+    <li>ร้านส่งมาส่งของ กด 🚚 รับของเข้า ใส่จำนวนที่มาส่ง</li>
+    <li><b>วันเสาร์หลังปิดร้าน</b> กด 📋 นับสต็อก อีกครั้ง — แอปจะบอกว่าแต่ละอย่างหายไปเท่าไหร่</li></ol></div>`;
+  const B=stk.counts[0],A=stk.counts[1];
+  const now=Date.now();
+  // running stock since the latest count
+  const ins=inBetween(B.ts,now),sold=soldBetween(B.ts,now,true);
+  const live=items.map(m=>{const v=(B.items[m.id]||0)+(ins[m.id]||0)-(sold[m.id]||0);return [m,v]});
+  let cmp='';
+  if(A){
+    const ins2=inBetween(A.ts,B.ts),sold2=soldBetween(A.ts,B.ts,false);let lossV=0;
+    const rows=items.map(m=>{const a=A.items[m.id]||0,i=ins2[m.id]||0,s=sold2[m.id]||0,exp=a+i-s,b=B.items[m.id];const d=b==null?null:b-exp;
+      if(d!=null&&d<0&&m.cost!=null)lossV+=-d*m.cost*servOf(m);return {m,a,i,s,exp,b,d}}).filter(r=>r.a||r.i||r.s||r.b);
+    cmp=`<div class="box" style="margin-bottom:16px;overflow-x:auto"><h3 style="margin-top:0">เทียบรอบนับ ${new Date(A.ts).toLocaleDateString('th-TH',{weekday:'short',day:'numeric',month:'short'})} → ${new Date(B.ts).toLocaleDateString('th-TH',{weekday:'short',day:'numeric',month:'short'})}</h3>
+    <table><tr><th>รายการ</th><th class="r">ตั้งต้น</th><th class="r">+ รับเข้า</th><th class="r">− ขาย</th><th class="r">ควรเหลือ</th><th class="r">นับได้</th><th class="r">ต่าง</th></tr>
+    ${rows.map(r=>`<tr><td>${esc(r.m.name)}</td><td class="r">${fmt(r.a)}</td><td class="r">${r.i?fmt(r.i):''}</td><td class="r">${fmt(r.s)}</td><td class="r">${fmt(r.exp)}</td><td class="r"><b>${r.b==null?'—':fmt(r.b)}</b></td>
+      <td class="r"><b style="color:${r.d==null||Math.abs(r.d)<(r.m.cat==='spirit'?0.15:0.5)?'var(--green)':r.d<0?'var(--red)':'var(--blue)'}">${r.d==null?'':Math.abs(r.d)<(r.m.cat==='spirit'?0.15:0.5)?'✓':(r.d>0?'+':'')+fmt(r.d)}</b></td></tr>`).join('')}</table>
+    ${lossV?`<p style="color:var(--red);margin-bottom:0">มูลค่าที่หายไป (ตามต้นทุน) ประมาณ <b>${money(Math.round(lossV))}</b></p>`:''}
+    <p class="muted" style="font-size:12px;margin-bottom:0">ติดลบ = ของน้อยกว่าที่ควร (รินเกิน · แถมไม่ได้กด · แตก · หาย) · บวก = มีมากกว่า (ลืมกดขาย/นับผิด) · เหล้าคลาดได้ ±0.1 ขวด</p></div>`;
+  }
+  const hist=[...stk.counts.map(d=>({...d,lab:'📋 นับสต็อก'})),...stk.ins.map(d=>({...d,lab:'🚚 รับของเข้า'}))].sort((a,b)=>b.ts-a.ts).slice(0,12);
+  return head+btns+cmp+`<div class="cols"><div class="box"><h3 style="margin-top:0">📦 สต็อกตอนนี้ (ประมาณ)</h3><p class="muted" style="margin-top:0;font-size:13px">นับล่าสุด ${new Date(B.ts).toLocaleString('th-TH',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} + รับเข้า − ขายไป</p>
+    <table>${live.map(([m,v])=>`<tr><td>${esc(m.name)}</td><td class="r" style="${v<(m.cat==='spirit'?0.5:6)?'color:var(--red);font-weight:700':''}">${fmt(v)}</td></tr>`).join('')}</table>
+    <p class="muted" style="font-size:12px;margin-bottom:0">ตัวแดง = ใกล้หมด (เบียร์ต่ำกว่า 6 · เหล้าต่ำกว่าครึ่งขวด)</p></div>
+    <div class="box"><h3 style="margin-top:0">ประวัติ</h3><table>${hist.map(d=>`<tr><td>${d.lab}<div class="muted" style="font-size:12px">${new Date(d.ts).toLocaleString('th-TH',{weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · ${Object.keys(d.items||{}).length} รายการ</div></td><td class="r"><button class="mini" style="color:var(--red)" onclick="stockDel('${d.id}')">ลบ</button></td></tr>`).join('')}</table></div></div>`;
 }
 
 /* ---------- ⭐ popular drinks (last 3 weeks) ---------- */
@@ -1125,6 +1208,7 @@ function menuModal(id){
   <div class="field"><label>ราคา (บาท)</label><input id="mp" type="number" inputmode="decimal" value="${esc(m.price)}"></div>
   <div class="field"><label>ต้นทุนต่อหน่วย (บาท) — ใช้คำนวณกำไร</label><input id="mcost" type="number" inputmode="decimal" value="${esc(m.cost??'')}" placeholder="เช่น Leo ใหญ่ ทุนขวดละ 62">
     <div class="row" style="margin-top:6px;flex-wrap:wrap;font-size:14px"><span class="muted">เหล้าแก้ว/ช็อต: ขวดละ</span><input id="mbot" type="number" inputmode="decimal" style="max-width:90px" placeholder="บาท"><span class="muted">ได้</span><input id="mgl" type="number" inputmode="numeric" style="max-width:70px" placeholder="แก้ว"><button class="btn" onclick="const b=parseFloat($('#mbot').value),g=parseFloat($('#mgl').value);if(b>0&&g>0)$('#mcost').value=Math.round(b/g*100)/100">คำนวณ</button></div></div>
+  <div class="field"><label>นับสต็อก: 1 ขวด/กล่อง ขายได้กี่แก้ว/ช็อต (เฉพาะเหล้า·ไวน์)</label><input id="mserv" type="number" inputmode="decimal" value="${esc(m.serv??(m.cat==='spirit'?servOf(m):''))}" placeholder="เช่น ขวดลิตร แก้ว 60ml = 16.67"></div>
   <div class="field"><label>หมวด</label><select id="mc">${CATS.map(c=>`<option value="${c.id}" ${c.id===m.cat?'selected':''}>${c.label}</option>`).join('')}</select></div>
   <div class="field"><label>สีปุ่ม</label><div class="row"><input id="mcol" type="color" value="${m.color||autoColor(m.name,m.cat)}" style="width:64px;height:46px;padding:4px"><label class="check" style="margin:0"><input type="checkbox" id="mcolAuto" ${m.color?'':'checked'}> ใช้สีอัตโนมัติตามยี่ห้อ</label></div></div>
   <div class="field"><label>ลำดับการแสดง (ไม่ใส่ก็ได้ — เลขน้อยขึ้นก่อน)</label><input id="ms" type="number" inputmode="numeric" value="${esc(m.sort??'')}"></div>
@@ -1135,7 +1219,7 @@ function menuModal(id){
 function saveMenu(id){
   const name=$('#mn').value.trim(),price=parseFloat($('#mp').value),cat=$('#mc').value,s=$('#ms').value;
   if(!name||!(price>=0))return toast('ใส่ชื่อและราคาให้ครบนะคะ',true);
-  id=id||uid();const doc={id,name,price,cat};if(s!=='')doc.sort=parseInt(s,10);const cv=$('#mcost').value;if(cv!==''&&parseFloat(cv)>=0)doc.cost=parseFloat(cv);if(!$('#mcolAuto').checked)doc.color=$('#mcol').value;
+  id=id||uid();const doc={id,name,price,cat};if(s!=='')doc.sort=parseInt(s,10);const cv=$('#mcost').value;if(cv!==''&&parseFloat(cv)>=0)doc.cost=parseFloat(cv);const sv=parseFloat($('#mserv').value);if(cat==='spirit'&&sv>0)doc.serv=sv;if(!$('#mcolAuto').checked)doc.color=$('#mcol').value;
   put('menu',id,doc);closeModal();
 }
 function delMenu(id){closeModal();confirmModal('ลบเมนูนี้?','บิลเก่าที่มีรายการนี้จะยังเก็บข้อมูลไว้เหมือนเดิม','ลบ',()=>put('menu',id,null))}
