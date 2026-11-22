@@ -205,7 +205,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>(Math.round((n||0)*100)/100).toLocaleString('th-TH')+' ฿';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const APP_VERSION='22 Nov 13:00';
+const APP_VERSION='22 Nov 13:30';
 const STAFF_DISC=40;
 const STAFF_TREAT=20; // ฿ the staff member gets for each drink a customer buys them (customer price unchanged) // % off everything for staff drinks
 const tabSub=t=>(t.items||[]).reduce((s,i)=>s+i.price*i.qty,0);
@@ -217,6 +217,9 @@ const unsentCount=t=>(t.items||[]).reduce((s,i)=>s+Math.abs(i.qty-sentOf(i)),0);
 const MIXERS=['Soda','Tonic','Coke','Coke Zero','Sprite','Manao Soda','Water','On the rocks','Neat'];
 const isGlass=m=>m&&m.cat==='spirit'&&/\(glass\)/i.test(m.name)&&!/wine/i.test(m.name); // wine needs no mixer
 const lineName=i=>i.name+(i.mix?' + '+i.mix:'');
+// what the customer sees: the same drink bought for several staff members is one line (×3), not three
+function customerLines(t){const g={},out=[];(t.items||[]).forEach(i=>{if(i.qty<=0)return;const k=i.name+'|'+i.price+'|'+(i.mix||'')+'|'+(i.comp?1:0);
+  if(!g[k]){g[k]={...i,qty:0,staffQty:0};delete g[k].treat;out.push(g[k])}g[k].qty+=i.qty;if(i.treat)g[k].staffQty+=i.qty});return out}
 function dayStartOf(d){const x=new Date(d);if(x.getHours()<DAY_CUTOFF)x.setDate(x.getDate()-1);x.setHours(DAY_CUTOFF,0,0,0);return x.getTime()}
 const dayStart=()=>dayStartOf(Date.now());
 function fmtTime(ts){return new Date(ts).toLocaleTimeString('th-TH',{hour:'2-digit',minute:'2-digit'})}
@@ -456,7 +459,7 @@ function costOf(i){if(i.cost!=null)return i.cost;const m=S.menu.find(x=>x.id===i
 const MIX_MENU={'Soda':/^soda/i,'Tonic':/tonic/i,'Coke':/^coke$/i,'Coke Zero':/coke zero/i,'Sprite':/sprite/i,'Manao Soda':/manao/i,'Water':/water/i};
 function mixerCost(mix){if(!mix||!MIX_MENU[mix])return 0;const m=S.menu.find(x=>x.cat==='other'&&MIX_MENU[mix].test(x.name));return m&&m.cost!=null?m.cost:0}
 /* unit costs worked out from the supplier receipts (Sep–Nov 2026).
-   spirits: 1 L bottles (Bombay & Tequila Rose 750 ml); a glass = 60 ml (16.7 per litre), a shot = 33 ml (30.3 per litre); wine: 5 L box, 150 ml a glass */
+   spirits: 1 L bottles (Bombay & Tequila Rose 750 ml); a glass = 60 ml (16.7 per litre), a shot = 33 ml (30.3 per litre); wine: 5 L box, 170 ml a glass */
 const COST_PRESET=[
   [/^leo.*large/i,53.75,'Leo 620ml ลัง 12 = 645'],[/^leo.*small/i,33.63,'Leo 320ml ลัง 24 = 807'],
   [/^chang.*large/i,52.92,'ช้าง 620ml ลัง 12 = 635'],[/^chang.*small/i,33.21,'ช้าง 320ml ลัง 24 = 797'],
@@ -475,21 +478,21 @@ const COST_PRESET=[
   [/aquavit/i,82.5,'Aquavit 1L ≈ 2,500 ÷ 30.3 ช็อต (33ml)'],
   [/j[äa]germeister/i,44.06,'Jäger 1L = 1,335 ÷ 30.3 ช็อต (33ml)'],[/tequila rose/i,38.5,'Tequila Rose 750ml = 875 ÷ 22.7 ช็อต'],[/tequila (silver|sierra)/i,42.74,'Tequila Sierra 1L = 1,295 ÷ 30.3 ช็อต'],
   [/jim beam/i,58.2,'Jim Beam 700ml = 679 ÷ 11.7 แก้ว'],
-  [/red wine/i,33.9,'LA VIDA Red 5L = 1,130 ÷ 33 แก้ว'],[/white wine/i,33.9,'LA VIDA White 5L = 1,130 ÷ 33 แก้ว']];
+  [/red wine/i,38.42,'LA VIDA Red 5L = 1,130 ÷ 29.4 แก้ว (170ml)'],[/white wine/i,38.42,'LA VIDA White 5L = 1,130 ÷ 29.4 แก้ว (170ml)']];
 // how many servings one stock unit (bottle / box) gives — used by the stock count
-const SERV_PRESET=[[/bombay/i,12.5],[/jim beam/i,11.67],[/tequila rose/i,22.7],[/wine/i,33.3],[/\(shot\)/i,30.3],[/\(glass\)/i,16.67]];
+const SERV_PRESET=[[/bombay/i,12.5],[/jim beam/i,11.67],[/tequila rose/i,22.7],[/wine/i,29.41],[/\(shot\)/i,30.3],[/\(glass\)/i,16.67]];
 function servOf(m){if(!m)return 1;if(m.serv)return m.serv;if(m.cat!=='spirit')return 1;const p=SERV_PRESET.find(([re])=>re.test(m.name));return p?p[1]:16.67}
 function presetPlan(){
   const plan=[],used=new Set();
   S.menu.forEach(m=>{const p=COST_PRESET.find(([re])=>re.test(m.name));if(p){plan.push({m,cost:p[1],note:p[2]});used.add(p)}});
-  const add=[];if(!S.menu.some(m=>/red wine/i.test(m.name)))add.push({name:'Red Wine (glass)',price:120,cat:'spirit',cost:33.9});
-  if(!S.menu.some(m=>/white wine/i.test(m.name)))add.push({name:'White Wine (glass)',price:120,cat:'spirit',cost:33.9});
+  const add=[];if(!S.menu.some(m=>/red wine/i.test(m.name)))add.push({name:'Red Wine (glass)',price:120,cat:'spirit',cost:38.42,serv:29.41});
+  if(!S.menu.some(m=>/white wine/i.test(m.name)))add.push({name:'White Wine (glass)',price:120,cat:'spirit',cost:38.42,serv:29.41});
   const none=S.menu.filter(m=>!COST_PRESET.some(([re])=>re.test(m.name))&&m.cost==null).map(m=>m.name);
   return {plan,add,none};
 }
 function presetModal(){
   const {plan,add,none}=presetPlan();
-  modal(`<h2 style="margin-bottom:2px">📥 ใส่ต้นทุนจากใบเสร็จร้านส่ง</h2><div class="muted">เหล้า 1 ลิตร (Bombay, Tequila Rose 750ml) · แก้ว = 60ml (16.7 แก้ว/ลิตร) · ช็อต = 33ml (30.3 ช็อต/ลิตร) · ไวน์ 150ml/แก้ว</div>
+  modal(`<h2 style="margin-bottom:2px">📥 ใส่ต้นทุนจากใบเสร็จร้านส่ง</h2><div class="muted">เหล้า 1 ลิตร (Bombay, Tequila Rose 750ml) · แก้ว = 60ml (16.7 แก้ว/ลิตร) · ช็อต = 33ml (30.3 ช็อต/ลิตร) · ไวน์ 170ml/แก้ว</div>
   <div style="max-height:45vh;overflow:auto;margin:10px 0"><table>${plan.map(x=>`<tr><td>${esc(x.m.name)}<div class="muted" style="font-size:12px">${esc(x.note)}</div></td><td class="r">${x.m.cost!=null&&x.m.cost!==x.cost?'<s class="muted">'+x.m.cost+'</s> ':''}<b>${x.cost}</b></td></tr>`).join('')}
   ${add.map(a=>`<tr><td>➕ เพิ่มเมนู ${esc(a.name)} · ${a.price} ฿</td><td class="r"><b>${a.cost}</b></td></tr>`).join('')}</table></div>
   ${none.length?`<p style="color:#c77700;font-size:13px">ไม่มีในใบเสร็จ ต้องใส่เอง: ${esc(none.join(', '))}</p>`:''}
@@ -497,7 +500,7 @@ function presetModal(){
 }
 function applyPreset(){
   const {plan,add}=presetPlan();
-  plan.forEach(({m,cost})=>{const d={...m,cost};if(m.cat==='spirit'&&!m.serv)d.serv=servOf(m);put('menu',m.id,d)});
+  plan.forEach(({m,cost})=>{const d={...m,cost};if(m.cat==='spirit')d.serv=servOf({...m,serv:0});put('menu',m.id,d)});
   add.forEach(a=>{const id=uid();put('menu',id,{id,...a,sort:20})});
   closeModal();toast('ใส่ต้นทุนแล้ว '+plan.length+' รายการ'+(add.length?' · เพิ่มไวน์ '+add.length+' เมนู':''));
 }
@@ -1271,7 +1274,7 @@ function drawShow(){
       <div class="sh-brand"><img src="${logo}" alt="">Ssshhh</div>
       <div class="sh-sub">Cafe Bar · Soi 102 · Hua Hin</div>
       <div class="sh-guest">${t.type==='number'?'#':''}${esc(t.label)}${t.no?` <span class="sh-sub">· Bill #${t.no}</span>`:''}</div>
-      <div class="sh-items">${t.items.filter(i=>i.qty>0).map(i=>`<div><span>${esc(lineName(i))} ×${i.qty}</span><span>${(i.price*i.qty).toLocaleString('en-US')}</span></div>`).join('')}</div>
+      <div class="sh-items">${customerLines(t).map(i=>`<div><span>${esc(lineName(i))} ×${i.qty}${i.staffQty?`<br><small style="opacity:.65;font-style:italic">incl. ${i.staffQty} for staff — thank you! 🍻</small>`:''}</span><span>${(i.price*i.qty).toLocaleString('en-US')}</span></div>`).join('')}</div>
       ${t.disc?`<div class="sh-items"><div><span>Subtotal</span><span>${tabSub(t).toLocaleString('en-US')}</span></div><div><span>Staff discount −${t.disc}%</span><span>−${tabDisc(t).toLocaleString('en-US')}</span></div></div>`:''}
       <div class="sh-total"><span>TOTAL</span><span>${total.toLocaleString('en-US')} THB</span></div>
       <div class="sh-qr">${typeof qrcode==='function'?qrSvg(SHOP_QR):''}</div>
@@ -1311,11 +1314,12 @@ async function receiptCanvas(t){
   lr('Date',d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'  '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
   dash();
   const amtW=120,qtyX=W-P-amtW-20;
-  (t.items||[]).filter(i=>i.qty>0).forEach(i=>{
+  customerLines(t).forEach(i=>{
     x.font='400 24px '+F;y+=36;x.textAlign='left';
     let n=i.name+(i.comp?' (free)':'');const maxW=qtyX-P-60;while(x.measureText(n).width>maxW&&n.length>2)n=n.slice(0,-2)+'…';
     x.fillText(n,P,y);x.textAlign='right';x.fillText('×'+i.qty,qtyX,y);x.fillText((i.price*i.qty).toLocaleString('en-US'),W-P,y);
     if(i.mix){x.textAlign='left';x.font='400 22px '+F;y+=30;x.fillText('   + '+i.mix,P,y)}
+    if(i.staffQty){x.textAlign='left';x.font='italic 400 21px '+F;y+=29;x.fillText('   incl. '+i.staffQty+' for staff — thank you!',P,y)}
   });
   dash();
   const total=paid?(t.total??tabTotal(t)):tabTotal(t);
