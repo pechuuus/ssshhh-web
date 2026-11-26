@@ -138,7 +138,8 @@ tr.click{cursor:pointer}
 .sh-brand{display:flex;align-items:center;gap:8px;font-family:'Great Vibes',cursive;font-size:44px;line-height:1}
 .sh-brand img{width:52px;height:52px;object-fit:contain}
 .sh-sub{font-size:13px;color:#6b6461;letter-spacing:.3px}
-.sh-guest{font-size:18px;font-weight:700;margin-top:6px}
+.sh-no{display:inline-block;background:#151515;color:#fff;border-radius:10px;padding:2px 14px;font-size:26px;font-weight:800;margin-top:4px;letter-spacing:.5px}
+.sh-guest{font-size:34px;font-weight:800;margin-top:6px;line-height:1.15}
 .sh-items{width:100%;max-height:24vh;overflow:auto;border-top:1px dashed #bbb;border-bottom:1px dashed #bbb;padding:4px 0;margin:6px 0}
 .sh-items div{display:flex;justify-content:space-between;gap:10px;font-size:15px;padding:3px 0}
 .sh-total{display:flex;justify-content:space-between;width:100%;font-size:30px;font-weight:800;align-items:baseline}
@@ -205,7 +206,7 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const money=n=>(Math.round((n||0)*100)/100).toLocaleString('th-TH')+' ฿';
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
-const APP_VERSION='22 Nov 13:30';
+const APP_VERSION='25 Nov 23:00';
 const STAFF_DISC=40;
 const STAFF_TREAT=20; // ฿ the staff member gets for each drink a customer buys them (customer price unchanged) // % off everything for staff drinks
 const tabSub=t=>(t.items||[]).reduce((s,i)=>s+i.price*i.qty,0);
@@ -470,7 +471,7 @@ const COST_PRESET=[
   [/^soda/i,8.33,'สิงห์โซดา 325ml แพ็ค 24 = 200'],[/water/i,4.08,'คริสตัล 600ml แพ็ค 12 = 49'],
   [/^coke$/i,14.33,'โค้ก แพ็ค 6 = 86'],[/coke zero/i,14.33,'โค้กไม่มีน้ำตาล แพ็ค 6 = 86'],[/sprite/i,14.33,'สไปรท์ แพ็ค 6 = 86'],
   [/tonic/i,15.21,'ชเวปส์ โทนิค 24 กระป๋อง = 365'],[/manao/i,15.33,'ชเวปส์ มะนาว แพ็ค 6 = 92'],
-  [/orange/i,19.5,'มาลี 1L = 78 (4 แก้ว)'],[/pineapple/i,19.5,'มาลี 1L = 78 (4 แก้ว)'],
+  [/orange/i,27.3,'มาลี 1L = 78 ÷ 2.86 แก้ว (350ml)'],[/pineapple/i,27.3,'มาลี 1L = 78 ÷ 2.86 แก้ว (350ml)'],
   [/sangsom/i,26.4,'แสงโสม 1L = 440 ÷ 16.7 แก้ว (60ml)'],[/hong thong/i,23.7,'หงษ์ทอง 1L = 395 ÷ 16.7'],
   [/walker red|jw red/i,55.2,'JW Red 1L = 920 ÷ 16.7'],[/walker black|jw black/i,100.2,'JW Black 1L = 1,670 ÷ 16.7'],
   [/jack daniel/i,94.8,"Jack Daniel's 1L = 1,580 ÷ 16.7"],[/gilbey/i,29.7,"Gilbey's 1L = 495 ÷ 16.7"],[/bombay/i,96,'Bombay 750ml = 1,200 ÷ 12.5'],
@@ -1273,7 +1274,7 @@ function drawShow(){
     <div class="sh-main">
       <div class="sh-brand"><img src="${logo}" alt="">Ssshhh</div>
       <div class="sh-sub">Cafe Bar · Soi 102 · Hua Hin</div>
-      <div class="sh-guest">${t.type==='number'?'#':''}${esc(t.label)}${t.no?` <span class="sh-sub">· Bill #${t.no}</span>`:''}</div>
+      <div class="sh-guest">${t.type==='number'?'#':''}${esc(t.label)}</div>${t.no?`<div class="sh-no">Bill #${t.no}</div>`:''}
       <div class="sh-items">${customerLines(t).map(i=>`<div><span>${esc(lineName(i))} ×${i.qty}${i.staffQty?`<br><small style="opacity:.65;font-style:italic">incl. ${i.staffQty} for staff — thank you! 🍻</small>`:''}</span><span>${(i.price*i.qty).toLocaleString('en-US')}</span></div>`).join('')}</div>
       ${t.disc?`<div class="sh-items"><div><span>Subtotal</span><span>${tabSub(t).toLocaleString('en-US')}</span></div><div><span>Staff discount −${t.disc}%</span><span>−${tabDisc(t).toLocaleString('en-US')}</span></div></div>`:''}
       <div class="sh-total"><span>TOTAL</span><span>${total.toLocaleString('en-US')} THB</span></div>
@@ -1308,9 +1309,11 @@ async function receiptCanvas(t){
   dash();
   const paid=t.status==='paid';
   x.font='700 34px '+F;x.textAlign='center';y+=40;x.fillText(paid?'RECEIPT':'BILL',W/2,y);
-  y+=6;lr('Guest',(t.type==='number'?'#':'')+t.label,'600 26px '+F);
+  // big black box with the guest name and bill number, easy to read at the till
+  {const nm=(t.type==='number'?'#':'')+t.label;y+=16;const bh=t.no?150:100;x.fillRect(P,y,W-2*P,bh);x.fillStyle='#fff';x.textAlign='center';
+   let fs=64;x.font='700 '+fs+'px '+F;while(x.measureText(nm).width>W-2*P-30&&fs>30){fs-=4;x.font='700 '+fs+'px '+F}
+   x.fillText(nm,W/2,y+(t.no?78:70));if(t.no){x.font='700 40px '+F;x.fillText('#'+t.no,W/2,y+132)}x.fillStyle='#000';y+=bh}
   const d=new Date(paid?t.paidAt:Date.now());
-  if(t.no)lr('Bill no.','#'+t.no);
   lr('Date',d.toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric'})+'  '+d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'}));
   dash();
   const amtW=120,qtyX=W-P-amtW-20;
